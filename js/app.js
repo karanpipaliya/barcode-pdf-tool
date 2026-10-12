@@ -71,6 +71,98 @@ async function getPageText(page){
   return content.items.map(function(i){return i.str||"";}).join(" ");
 }
 
+async function getPageDetails(page){
+  const content=await page.getTextContent();
+  const items=content.items
+    .map(function(i){
+      return {
+        text:(i.str||"").trim(),
+        x:(i.transform && i.transform[4]) || 0,
+        y:(i.transform && i.transform[5]) || 0
+      };
+    })
+    .filter(function(i){return i.text;});
+  const text=items.map(function(i){return i.text;}).join(" ");
+  const tracking=detectTracking(text);
+  // PDF.js text coordinates use the PDF page's bottom-left origin. Keep the
+  // baseline of the invoice disclaimer so SKU/courier can be printed beneath it.
+  const disclaimerItem=items.find(function(i){
+    return /Tax is not payable on reverse charge basis/i.test(i.text);
+  });
+  const disclaimerY=disclaimerItem ? disclaimerItem.y : mm(60);
+
+  // Read the SKU value positioned directly below the "SKU" column heading.
+  let sku=null;
+  const skuHeader=items.find(function(i){return /^SKU$/i.test(i.text);});
+  if(skuHeader){
+    const candidates=items.filter(function(i){
+      return i.y < skuHeader.y - 1 &&
+             Math.abs(i.x-skuHeader.x) < 35 &&
+             !/^(SKU|Size|Qty|Color|Order No\.?|Product Details)$/i.test(i.text);
+    }).sort(function(a,b){
+      const dyA=skuHeader.y-a.y, dyB=skuHeader.y-b.y;
+      return dyA-dyB;
+    });
+    if(candidates.length) sku=candidates[0].text;
+  }
+
+  // Fallback for PDFs whose text order is extracted differently.
+  if(!sku){
+    const normalized=text.replace(/\s+/g," ").trim();
+    const m=normalized.match(/SKU\s+Size\s+Qty\s+Color\s+Order\s+No\.?\s+(.+?)\s+(?:Free Size|FreeSize|One Size|1 Size)\b/i);
+    if(m) sku=m[1].trim();
+  }
+
+  let courier="Other / Unknown";
+  // Detect the carrier name printed in the shipping-label header.
+  // Keep ValmoPlus and Valmo Pickup under the common "Valmo" group.
+  if(/\bValmo(?:Plus)?\b/i.test(text)) courier="Valmo";
+  else if(/\bShadowfax\b/i.test(text) || /\bSF[A-Z0-9]{8,}FPL\b/i.test(text)) courier="Shadowfax";
+  else if(/\bXpress\s*Bees\b/i.test(text) || /\bXpressbees\b/i.test(text)) courier="XpressBees";
+  else if(/\bDelhivery\b/i.test(text)) courier="Delhivery";
+  else if(/\bEcom\s*Express\b/i.test(text)) courier="Ecom Express";
+  else if(/\bDTDC\b/i.test(text)) courier="DTDC";
+
+  return {tracking:tracking, sku:sku || "SKU not detected", courier:courier, disclaimerY:disclaimerY};
+}
+
+function renderSummary(details){
+  const skuCounts=new Map(), courierCounts=new Map();
+  details.forEach(function(d){
+    const sku=d.sku || "SKU not detected";
+    const courier=d.courier || "Other / Unknown";
+    skuCounts.set(sku,(skuCounts.get(sku)||0)+1);
+    courierCounts.set(courier,(courierCounts.get(courier)||0)+1);
+  });
+
+  function tableRows(map){
+    return Array.from(map.entries()).sort(function(a,b){return b[1]-a[1];})
+      .map(function(entry){
+        return '<tr><td>'+escapeHtml(entry[0])+'</td><td class="qty">'+entry[1]+'</td></tr>';
+      }).join("");
+  }
+  const totalOrders=details.length;
+  const trackedOrders=details.filter(function(d){return Boolean(d.tracking);}).length;
+  results.innerHTML =
+    '<div class="totals-grid">'+
+      '<div class="total-card"><span>Total Orders</span><strong>'+totalOrders+'</strong></div>'+
+      '<div class="total-card"><span>Tracking Numbers Found</span><strong>'+trackedOrders+'</strong></div>'+
+    '</div>'+
+    '<div class="summary-grid">'+
+      '<section class="summary-panel"><h3>SKU Wise</h3><table><thead><tr><th>SKU</th><th>Orders</th></tr></thead><tbody>'+
+        tableRows(skuCounts)+'</tbody></table></section>'+
+      '<section class="summary-panel"><h3>Courier Partner Wise</h3><table><thead><tr><th>Courier Partner</th><th>Orders</th></tr></thead><tbody>'+
+        tableRows(courierCounts)+'</tbody></table></section>'+
+    '</div>'+
+    '<p class="summary-note">Each PDF page is counted as one order. Courier partner is detected from the carrier name printed on the shipping label.</p>';
+}
+
+function escapeHtml(value){
+  return String(value).replace(/[&<>"']/g,function(ch){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch];
+  });
+}
+
 function barcodeDataUrl(code){
   const canvas=document.createElement("canvas");
   bwipjs.toCanvas(canvas,{
@@ -126,18 +218,18 @@ async function processPdf(){
     const pdf=await loading.promise;
     const out=await PDFLib.PDFDocument.load(pdfLibBytes);
     const font=await out.embedFont(PDFLib.StandardFonts.Helvetica);
-    const found=[];
+    const boldFont=await out.embedFont(PDFLib.StandardFonts.HelveticaBold);
+    const details=[];
 
     for(let i=1;i<=pdf.numPages;i++){
-      setStatus("Detecting tracking number: page "+i+"/"+pdf.numPages);
+      setStatus("Reading SKU and courier: page "+i+"/"+pdf.numPages);
       const page=await pdf.getPage(i);
-      const text=await getPageText(page);
-      found.push(detectTracking(text));
+      details.push(await getPageDetails(page));
     }
 
     for(let i=0;i<out.getPageCount();i++){
-      const code=found[i];
-      if(!code) continue;
+      const detail=details[i];
+      const code=detail.tracking;
       const page=out.getPage(i);
       const pw=page.getWidth(), ph=page.getHeight();
       const left=mm(Math.max(0,Number(document.getElementById("leftMargin").value)||0));
@@ -147,6 +239,21 @@ async function processPdf(){
       const textPx=Math.max(7,Number(document.getElementById("textSize").value)||16);
       const show=document.getElementById("showText").value==="yes";
       const qrEnabled=document.getElementById("qrEnabled").value==="yes";
+
+      // Print compact SKU | Courier line on every page, left-aligned and bold by default.
+      // UI size is in px; PDF font size uses points (1 px ≈ 0.75 pt).
+      const infoTextPx=Math.max(7,Math.min(40,Number(document.getElementById("infoTextSize").value)||16));
+      const infoFontSize=infoTextPx*0.75;
+      const infoY=Math.max(mm(30),detail.disclaimerY-30);
+      const infoLine=(detail.sku || "SKU not detected")+"   |   "+(detail.courier || "Other / Unknown");
+      page.drawText(infoLine,{
+        x:mm(6), y:infoY, size:infoFontSize, font:boldFont,
+        color:PDFLib.rgb(0,0,0), maxWidth:pw-mm(12)
+      });
+
+      // If a page has no detected tracking number, still print SKU/courier but
+      // do not try to create a barcode for that page.
+      if(!code) continue;
 
       // Reserve 35 mm QR + 5 mm gap on the right. The QR keeps a 5 mm right margin.
       const qrSize=mm(35);
@@ -189,13 +296,9 @@ async function processPdf(){
     setStatus("Creating final PDF...");
     outputBytes=await out.save();
     resultCard.hidden=false;
-    results.innerHTML=found.map(function(c,i){
-      return '<div class="row"><span>Page '+(i+1)+'</span>'+
-        (c?'<span class="ok">'+c+'</span>':'<span class="warn">Tracking number not detected</span>')+
-        '</div>';
-    }).join("");
-    const count=found.filter(Boolean).length;
-    setStatus("Done — "+count+" of "+found.length+" pages received a barcode.");
+    renderSummary(details);
+    const count=details.filter(function(d){return Boolean(d.tracking);}).length;
+    setStatus("Done — "+count+" of "+details.length+" pages received a barcode. Summary grouped by SKU and courier partner.");
   }catch(err){
     console.error(err);
     setStatus("Error: "+(err && err.message ? err.message : String(err)));
