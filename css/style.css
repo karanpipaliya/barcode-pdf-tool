@@ -5,3 +5,19 @@
 button.secondary{background:#475467}
 #pdfPreview{display:none;width:100%;height:700px;margin-top:18px;border:1px solid #d5dbe5;border-radius:12px;background:#eef1f5}
 @media(max-width:650px){.action-row{grid-template-columns:1fr}}
+
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+.summary-panel{border:1px solid #e4e9f0;border-radius:12px;overflow:hidden;min-width:0}
+.summary-panel h3{margin:0;padding:14px;background:#f7f9fc;font-size:16px}
+.summary-panel table{width:100%;border-collapse:collapse;font-size:14px}
+.summary-panel th,.summary-panel td{padding:11px 12px;border-top:1px solid #edf0f4;text-align:left;overflow-wrap:anywhere}
+.summary-panel th{color:#667085;font-size:12px;background:#fff}
+.summary-panel .qty{text-align:right;font-weight:800;white-space:nowrap;width:65px}
+.summary-note{color:#667085;font-size:12px;margin:12px 0 0}
+@media(max-width:650px){.summary-grid{grid-template-columns:1fr}}
+
+.totals-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 16px}
+.total-card{border:1px solid #e4e9f0;border-radius:12px;padding:15px;background:#f8fafc;display:flex;flex-direction:column;gap:5px}
+.total-card span{font-size:13px;color:#667085;font-weight:700}
+.total-card strong{font-size:28px;color:#172033}
+@media(max-width:650px){.totals-grid{grid-template-columns:1fr}}
