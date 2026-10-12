@@ -31,6 +31,7 @@
         <div><label>Right margin (mm)</label><input id="rightMargin" type="number" value="5" min="0" step="0.5"></div>
         <div><label>Barcode height (mm)</label><input id="barcodeHeight" type="number" value="20" min="5" step="1"></div>
         <div><label>Barcode text size (px)</label><input id="textSize" type="number" value="16" min="7" step="1"></div>
+        <div><label>SKU | Courier font size (px)</label><input id="infoTextSize" type="number" value="16" min="7" max="40" step="1"></div>
         <div><label>Bottom margin (mm)</label><input id="bottomMargin" type="number" value="8" min="0" step="0.5"></div>
         <div><label>QR code</label><select id="qrEnabled"><option value="yes" selected>Show QR + FOLLOW PLEASE</option><option value="no">Hide QR</option></select></div>
         <div><label>Barcode text</label><select id="showText"><option value="yes" selected>Show tracking number</option><option value="no">Hide tracking number</option></select></div>
@@ -41,7 +42,7 @@
     </section>
 
     <section class="card result" id="resultCard" hidden>
-      <h2>Processing Result</h2>
+      <h2>Processing Summary</h2>
       <div id="results"></div>
       <div class="action-row">
         <button id="previewBtn" class="secondary">Preview PDF</button>
